@@ -1,0 +1,157 @@
+<nav>
+    <div class="notification-bell" id="notificationBell">
+        <span class="icon">🔔</span>
+        <link rel="stylesheet" href="css/notifications.css">
+        <span class="badge" id="notificationCount" style="display: none;">0</span>
+    </div>
+    <div class="notification-dropdown" id="notificationDropdown" style="display: none;">
+        <div class="notification-header">
+            <h3>Notifications</h3>
+            <button id="markAllRead">Mark all as read</button>
+        </div>
+        <div id="notificationList">
+            <!-- Notifications appear here -->
+        </div>
+    </div>
+</nav>
+
+<script>
+const BASE_URL = "http://127.0.0.1:8000/";
+let pollInterval;
+
+/* ------------ Start Polling ------------ */
+function startNotificationPolling() {
+    fetchNotifications();
+    pollInterval = setInterval(fetchNotifications, 10000);
+}
+
+/* ------------ Fetch Notification List ------------ */
+async function fetchNotifications() {
+    try {
+        const response = await fetch(BASE_URL + 'notifications/api/list/', {
+            credentials: "include"
+        });
+        const data = await response.json();
+        updateNotificationUI(data);
+    } catch (error) {
+        console.error('Failed to fetch notifications:', error);
+    }
+}
+
+/* ------------ Update UI ------------ */
+function updateNotificationUI(data) {
+    const count = data.count;
+    const badge = document.getElementById('notificationCount');
+    const list = document.getElementById('notificationList');
+
+    // Badge
+    if (count > 0) {
+        badge.textContent = count > 99 ? "99+" : count;
+        badge.style.display = "inline";
+    } else {
+        badge.style.display = "none";
+    }
+
+    // List
+    if (data.notifications.length === 0) {
+        list.innerHTML = '<p class="empty">No new notifications</p>';
+        return;
+    }
+
+    list.innerHTML = data.notifications.map(n => `
+        <div class="notification-item" data-id="${n.id}">
+            <img src="${n.actor.avatar || '/static/default-avatar.png'}" class="avatar">
+            <div class="content">
+                <strong>${n.actor.username}</strong> ${n.verb}
+                <time>${formatTime(n.created_at)}</time>
+            </div>
+            <button class="mark-read" data-id="${n.id}">✓</button>
+        </div>
+    `).join('');
+
+    attachClickHandlers();
+}
+
+/* ------------ Format Time ------------ */
+function formatTime(isoString) {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+}
+
+/* ------------ Attach Click Handlers ------------ */
+function attachClickHandlers() {
+    // mark single read
+    document.querySelectorAll('.mark-read').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = e.target.dataset.id;
+
+            await fetch(BASE_URL + `notifications/api/${id}/read/`, {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            });
+
+            fetchNotifications();
+        });
+    });
+
+    // notification click → read + redirect/reload
+    document.querySelectorAll('.notification-item').forEach(item => {
+        item.addEventListener('click', async () => {
+            const id = item.dataset.id;
+
+            await fetch(BASE_URL + `notifications/api/${id}/read/`, {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            });
+
+            window.location.reload();
+        });
+    });
+}
+
+/* ------------ Toggle Dropdown (Best Practice) ------------ */
+document.getElementById("notificationBell").addEventListener("click", () => {
+    const dropdown = document.getElementById("notificationDropdown");
+    dropdown.classList.toggle("show");
+});
+
+/* ------------ Mark All Read ------------ */
+document.getElementById("markAllRead").addEventListener("click", async () => {
+    await fetch(BASE_URL + 'notifications/api/read-all/', {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken')
+        }
+    });
+    fetchNotifications();
+});
+
+/* ------------ CSRF Helper ------------ */
+function getCookie(name) {
+    let value = `; ${document.cookie}`;
+    let parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';')[0];
+}
+
+/* ------------ Polling Control ------------ */
+document.addEventListener("DOMContentLoaded", startNotificationPolling);
+
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearInterval(pollInterval);
+    else startNotificationPolling();
+});
+</script>
